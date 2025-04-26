@@ -1,0 +1,101 @@
+//@version=6
+indicator("Breakout Strategie + MA Labels + Stops", overlay=true)
+
+// === Einstellungen === //
+ma10 = ta.sma(close, 10)
+ma50 = ta.sma(close, 50)
+ma150 = ta.sma(close, 150)
+ma200 = ta.sma(close, 200)
+
+// Breakout-Parameter
+volMultiplier = input.float(1.5, title="Volumen Multiplikator für Breakout", minval=0.5)
+gap_required = input.bool(false, title="Gap erforderlich für Breakout?")
+strongCandle_required = input.bool(false, title="Starke Kerze erforderlich für Breakout?")
+breakout_candle_mode = input.int(2, title="Breakout Candle Modus (1=Streng, 2=Locker)", options=[1,2])
+
+// Stop-Loss und Take-Profit
+use_stoploss = input.bool(true, title="Stop-Loss verwenden?")
+stoploss_perc = input.float(3.0, title="Stop-Loss %", minval=0.1)
+use_takeprofit = input.bool(true, title="Take-Profit verwenden?")
+takeprofit_perc = input.float(6.0, title="Take-Profit %", minval=0.1)
+
+// === Breakout Logik === //
+
+// Volumenbedingungen über 3 Kerzen
+avgVol = ta.sma(volume, 20)
+volBreak = (volume > avgVol * volMultiplier) or (volume[1] > avgVol * volMultiplier) or (volume[2] > avgVol * volMultiplier)
+
+// Gap Bedingung
+gap = open > high[1]
+
+// Starke Kerze
+body = math.abs(close - open)
+candleSize = high - low
+strongCandle = (close > open) and (body > candleSize * 0.5)
+
+// Breakout Candle Modus
+var bool candleOK = false
+if breakout_candle_mode == 1
+    candleOK := (close > open) and (body > candleSize * 0.5)
+else
+    candleOK := (close > open)
+
+// MA Trend (MA50 aufwärts)
+maTrend = ma50 > ma50[1]
+
+// Breakout Condition final
+isBreakout = volBreak and (close > ma50) and maTrend and candleOK
+if gap_required
+    isBreakout := isBreakout and gap
+if strongCandle_required
+    isBreakout := isBreakout and strongCandle
+
+// === Entry / Exit === //
+var bool inPosition = false
+var float entryPrice = na
+var float stopPrice = na
+var float targetPrice = na
+
+if isBreakout and not inPosition
+    inPosition := true
+    entryPrice := close
+    stopPrice := use_stoploss ? close * (1 - stoploss_perc/100) : na
+    targetPrice := use_takeprofit ? close * (1 + takeprofit_perc/100) : na
+    // Breakout-Label anzeigen
+    label.new(bar_index, low, "Breakout", style=label.style_label_up, color=color.green, textcolor=color.white, size=size.small)
+
+if inPosition
+    stopHit = use_stoploss and close <= stopPrice
+    targetHit = use_takeprofit and close >= targetPrice
+    if stopHit or targetHit
+        inPosition := false
+        label.new(bar_index, close, "Exit", style=label.style_label_down, color=color.red, textcolor=color.white, size=size.small)
+        stopPrice := na
+        targetPrice := na
+        entryPrice := na
+
+// === Hintergrundfarbe bei aktivem Trade === //
+bgcolor(inPosition ? color.new(color.green, 90) : na)
+
+// === Stop-Markierung === //
+stopLine = (inPosition and use_stoploss) ? stopPrice : na
+plot(stopLine, style=plot.style_cross, color=color.red, linewidth=2, title="Stop-Loss")
+
+// === Moving Averages Plot === //
+plot(ma10, color=color.blue, title="MA10")
+plot(ma50, color=color.orange, title="MA50")
+plot(ma150, color=color.green, title="MA150")
+plot(ma200, color=color.red, title="MA200")
+
+// === Labels für Trendwechsel === //
+var bool wasAbove10 = close[1] > ma10
+var bool wasAbove50 = close[1] > ma50
+
+if (close > ma10 and not wasAbove10)
+    label.new(bar_index, high, "Über MA10", style=label.style_label_up, color=color.blue, textcolor=color.white, size=size.small)
+
+if (close > ma50 and not wasAbove50)
+    label.new(bar_index, high, "Über MA50", style=label.style_label_up, color=color.teal, textcolor=color.white, size=size.small)
+
+wasAbove10 := close > ma10
+wasAbove50 := close > ma50
