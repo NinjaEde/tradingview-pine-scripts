@@ -1,0 +1,156 @@
+//@version=6
+indicator("Ede – MA + Breakout Strategie (Dynamic MAs)", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// === Input Options MA & HL ===
+msr                   = input.bool(false, "Ma10 (MSR)")
+milo                  = input.bool(false, "Ma50 and Ichimoku (MILO)")
+m3                    = input.bool(true,  "Ma50, Ma100, Ma200 (3M)")
+w52                   = input.bool(false, "Line 52 Week High|Low")
+ShowHL                = input.bool(false, "Line High|Low")
+
+// === Input Options Breakout ===
+volMultiplier         = input.float(1.5, title="Volumen-Multiplikator für Breakout", minval=0.5)
+gap_required          = input.bool(false, title="Gap erforderlich für Breakout?")
+strongCandle_required = input.bool(false, title="Starke Kerze erforderlich für Breakout?")
+breakout_candle_mode  = input.int(2, title="Breakout-Candle Modus (1=Streng, 2=Locker)", options=[1,2])
+
+use_stoploss          = input.bool(true,  title="Stop-Loss verwenden?")
+stoploss_perc         = input.float(3.0,  title="Stop-Loss %", minval=0.1)
+use_takeprofit        = input.bool(true,  title="Take-Profit verwenden?")
+takeprofit_perc       = input.float(6.0,  title="Take-Profit %", minval=0.1)
+
+// === Neue Input Options MA-Exit ===
+exit_on_ma10          = input.bool(true,  title="Exit bei Unterschreiten MA10 aktivieren")
+exit_on_ma50          = input.bool(false, title="Exit bei Unterschreiten MA50 aktivieren")
+
+// === Calculate Moving Averages ===
+sma10   = ta.sma(close, 10)
+sma50   = ta.sma(close, 50)
+sma100  = ta.sma(close, 100)
+sma150  = ta.sma(close, 150)
+sma200  = ta.sma(close, 200)
+
+// === Precompute MA Crossunder Signals ===
+ma10CrossUnder = ta.crossunder(close, sma10)
+ma50CrossUnder = ta.crossunder(close, sma50)
+
+// === Plot MAs ===
+plot(msr  ? sma10  : na, title="MA10",  color=color.blue,   linewidth=2)
+plot(milo or m3 ? sma50  : na, title="MA50",  color=color.orange, linewidth=2)
+plot(m3   ? sma100 : na, title="MA100", color=color.green,  linewidth=2)
+plot(m3   ? sma200 : na, title="MA200", color=color.red,    linewidth=2)
+
+// === MSR Bar Highlight ===
+msrbar = open < close and sma10 >= open and sma10 <= close and msr
+barcolor(msrbar ? color.blue : na, show_last=3)
+
+// === Ichimoku (MILO) ===
+conversionPeriods     = 9
+basePeriods           = 26
+laggingSpan2Periods   = 52
+displacement          = 26
+donchian(len)         => (ta.lowest(len) + ta.highest(len)) / 2
+conversionLine        = donchian(conversionPeriods)
+baseLine              = donchian(basePeriods)
+leadLine1             = (conversionLine + baseLine) / 2
+leadLine2             = donchian(laggingSpan2Periods)
+p1                    = plot(milo ? leadLine1 : na, offset=displacement, color=color.new(color.green, 0))
+p2                    = plot(milo ? leadLine2 : na, offset=displacement, color=color.new(color.red,   0))
+fill(p1, p2, color = leadLine1 > leadLine2 ? color.new(color.green, 85) : color.new(color.red, 85))
+
+// === 52-Week High/Low ===
+weekly_hh = request.security(syminfo.tickerid, "W", ta.highest(high, 52), lookahead=barmerge.lookahead_on)
+weekly_ll = request.security(syminfo.tickerid, "W", ta.lowest(low,  52), lookahead=barmerge.lookahead_on)
+plot(w52 ? weekly_hh : na, title="52W High", trackprice=true, color=color.green)
+plot(w52 ? weekly_ll : na, title="52W Low",  trackprice=true, color=color.red)
+
+// Dynamisches Management der 52W-Labels
+var label highLabel = na
+var label lowLabel  = na
+if w52 and bar_index % 10 == 0
+    if not na(highLabel)
+        label.delete(highLabel)
+    if not na(lowLabel)
+        label.delete(lowLabel)
+    highLabel := label.new(bar_index, weekly_hh, "52W High\n" + str.tostring(weekly_hh, format.mintick), style=label.style_label_down, color=color.green, textcolor=color.white, size=size.small)
+    lowLabel := label.new(bar_index, weekly_ll,  "52W Low\n"  + str.tostring(weekly_ll,  format.mintick), style=label.style_label_up,   color=color.red,   textcolor=color.white, size=size.small)
+
+// === High & Low (Recent) ===
+window1 = 8
+window2 = 21
+top1 = ta.valuewhen(high >= ta.highest(high, window1), high, 0)
+bot1 = ta.valuewhen(low  <= ta.lowest(low,  window1), low,  0)
+top2 = ta.valuewhen(high >= ta.highest(high, window2), high, 0)
+bot2 = ta.valuewhen(low  <= ta.lowest(low,  window2), low,  0)
+plot(ShowHL ? top1 : na, color=color.red)
+plot(ShowHL ? bot1 : na, color=color.green)
+plot(ShowHL ? top2 : na, color=color.red)
+plot(ShowHL ? bot2 : na, color=color.green)
+
+// === Breakout Logik ===
+avgVol     = ta.sma(volume, 20)
+volBreak   = (volume > avgVol * volMultiplier) or (volume[1] > avgVol * volMultiplier) or (volume[2] > avgVol * volMultiplier)
+gap        = open > high[1]
+body       = math.abs(close - open)
+candleSize = high - low
+strongCandle = (close > open) and (body > candleSize * 0.5)
+var bool candleOK = false
+if breakout_candle_mode == 1
+    candleOK := strongCandle
+else
+    candleOK := (close > open)
+maTrend    = sma50 > sma50[1]
+isBreakout = volBreak and (close > sma50) and maTrend and candleOK
+if gap_required
+    isBreakout := isBreakout and gap
+if strongCandle_required
+    isBreakout := isBreakout and strongCandle
+
+// === Entry / Exit ===
+var bool  inPosition  = false
+var float entryPrice  = na
+var float stopPrice   = na
+var float targetPrice = na
+// Labels für Breakout und Exit
+var label breakoutLabel = na
+var label exitLabel     = na
+
+if isBreakout and not inPosition
+    inPosition   := true
+    entryPrice   := close
+    stopPrice    := use_stoploss   ? close * (1 - stoploss_perc/100) : na
+    targetPrice  := use_takeprofit ? close * (1 + takeprofit_perc/100) : na
+    label.delete(breakoutLabel)
+    breakoutLabel := label.new(bar_index, low, "Breakout", style=label.style_label_up, color=color.rgb(76, 175, 79, 70), textcolor=color.white, size=size.small)
+
+if inPosition
+    stopHit   = use_stoploss   and close <= stopPrice
+    targetHit = use_takeprofit and close >= targetPrice
+    // Neuer MA-Exit unter Verwendung vorab berechneter Werte
+    ma10Exit  = exit_on_ma10 and ma10CrossUnder
+    ma50Exit  = exit_on_ma50 and ma50CrossUnder
+    maExitHit = ma10Exit or ma50Exit
+    if stopHit or targetHit or maExitHit
+        inPosition := false
+        label.delete(exitLabel)
+        exitLabel := label.new(bar_index, close, "Exit", style=label.style_label_lower_left, color=color.rgb(255, 82, 82, 70), textcolor=color.white, size=size.small)
+        entryPrice  := na
+        stopPrice   := na
+        targetPrice := na
+
+// === Hintergrundfarbe bei aktivem Trade ===
+bgcolor(inPosition ? color.new(color.green, 90) : na)
+
+// === Stop-Loss Linie ===
+stopLine = (inPosition and use_stoploss) ? stopPrice : na
+plot(stopLine, style=plot.style_cross, color=color.rgb(203, 255, 82, 30), linewidth=2, title="Stop-Loss")
+
+// === Trendwechsel-Labels ===
+var bool wasAbove10 = close[1] > sma10
+var bool wasAbove50 = close[1] > sma50
+if close > sma10 and not wasAbove10
+    label.new(bar_index, high, "Über MA10", style=label.style_label_up, color=color.rgb(33, 149, 243, 60), textcolor=color.white, size=size.small)
+if close > sma50 and not wasAbove50
+    label.new(bar_index, high, "Über MA50", style=label.style_label_up, color=color.rgb(0, 137, 123, 60), textcolor=color.white, size=size.small)
+wasAbove10 := close > sma10
+wasAbove50 := close > sma50
