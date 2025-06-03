@@ -8,12 +8,9 @@ show_ma150  = input.bool(true, "MA150 anzeigen")
 show_ma200  = input.bool(true, "MA200 anzeigen")
 
 // === Breakout Settings ===
-breakout_mode_str = input.string(title="Breakout-Modus", defval="Streng (Gap UND starke Kerze)", options=["Streng (Gap UND starke Kerze)", "Locker (Gap ODER starke Kerze)", "Kein Gap nötig"])
-
+breakout_mode_str = input.string(title="Breakout-Modus", defval="Nur Gap", options=["Streng (Gap UND starke Kerze)", "Locker (Gap ODER starke Kerze)", "Nur Gap"])
 // Intern in Zahlen übersetzen für die Logik
 breakout_mode = breakout_mode_str == "Streng (Gap UND starke Kerze)" ? 1 : breakout_mode_str == "Locker (Gap ODER starke Kerze)" ? 2 : 3
-
-//#breakout_mode = input.int(2, title="Breakout-Modus", options=[1, 2, 3]) // 1=Streng (Gap+Starke Kerze), 2=Locker (Gap oder Kerze), 3=Kein Gap nötig
 volMultiplier = input.float(1.5, title="Volumen-Multiplikator", minval=0.5)
 
 // === Exit Settings ===
@@ -56,7 +53,7 @@ if breakout_mode == 1
 else if breakout_mode == 2
     isBreakout := isBreakout and (gap or strongCandle)
 else
-    isBreakout := isBreakout and candleOK
+    isBreakout := isBreakout and gap
 
 // === Entry & Exit Management ===
 var bool inPosition = false
