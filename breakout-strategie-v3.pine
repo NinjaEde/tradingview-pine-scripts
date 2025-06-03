@@ -8,7 +8,7 @@ show_ma150  = input.bool(true, "MA150 anzeigen")
 show_ma200  = input.bool(true, "MA200 anzeigen")
 
 // === Breakout Settings ===
-breakout_mode_str = input.string(title="Breakout-Modus", defval="Nur Gap", options=["Streng (Gap UND starke Kerze)", "Locker (Gap ODER starke Kerze)", "Nur Gap"])
+breakout_mode_str = input.string(title="Breakout-Modus", defval="Nur Gap", options=["Nur Gap", "Streng (Gap UND starke Kerze)", "Locker (Gap ODER starke Kerze)"])
 // Intern in Zahlen übersetzen für die Logik
 breakout_mode = breakout_mode_str == "Streng (Gap UND starke Kerze)" ? 1 : breakout_mode_str == "Locker (Gap ODER starke Kerze)" ? 2 : 3
 volMultiplier = input.float(1.5, title="Volumen-Multiplikator", minval=0.5)
@@ -56,32 +56,52 @@ else
     isBreakout := isBreakout and gap
 
 // === Entry & Exit Management ===
-var bool inPosition = false
+// inPosition-Variable entfernt, Positionsstatus über strategy.position_size
 var float entryPrice = na
 var float stopPrice = na
 var float targetPrice = na
+var float atrTrailStop = na
+var float highestSinceEntry = na
 
 atr = ta.atr(atr_period)
 ma10Cross = ta.crossunder(close, sma10)
 ma50Cross = ta.crossunder(close, sma50)
 
-if isBreakout and not inPosition
+// Einstieg
+if isBreakout and strategy.position_size == 0
     strategy.entry("Breakout Long", strategy.long)
-    inPosition := true
     entryPrice := close
     stopPrice := close * (1 - stoploss_perc / 100)
     targetPrice := close * (1 + takeprofit_perc / 100)
+    highestSinceEntry := close
+    atrTrailStop := close - atr * atr_multiplier
 
-if inPosition
+// Während Position offen ist
+if strategy.position_size > 0
+    // High seit Einstieg tracken
+    highestSinceEntry := na(highestSinceEntry) ? close : math.max(highestSinceEntry, high)
+    // ATR-Trailing-Stop berechnen
+    atrTrailStop := highestSinceEntry - atr * atr_multiplier
+    // Exits
     stopHit   = use_stoploss    and close <= stopPrice
     tpHit     = use_takeprofit  and close >= targetPrice
     ma10Exit  = exit_on_ma10    and ma10Cross
     ma50Exit  = exit_on_ma50    and ma50Cross
-    atrExit   = exit_on_atr     and close < entryPrice - (atr * atr_multiplier)
+    atrExit   = exit_on_atr     and close < atrTrailStop
 
     if stopHit or tpHit or ma10Exit or ma50Exit or atrExit
         strategy.close("Breakout Long")
-        inPosition := false
+        entryPrice := na
+        stopPrice := na
+        targetPrice := na
+        highestSinceEntry := na
+        atrTrailStop := na
 
 // === Visuelle Darstellung ===
-bgcolor(inPosition ? color.new(color.green, 85) : na)
+// Linien für Stop-Loss, Take-Profit und ATR-Trailing-Stop
+plot(strategy.position_size > 0 and use_stoploss    ? stopPrice     : na, color=color.red,   style=plot.style_linebr, linewidth=2, title="Stop-Loss")
+plot(strategy.position_size > 0 and use_takeprofit  ? targetPrice   : na, color=color.green, style=plot.style_linebr, linewidth=2, title="Take-Profit")
+plot(strategy.position_size > 0 and exit_on_atr     ? atrTrailStop  : na, color=color.purple, style=plot.style_linebr, linewidth=2, title="ATR-Trailing-Stop")
+
+// Hintergrundfarbe nur, wenn Position offen (über strategy.position_size)
+bgcolor(strategy.position_size > 0 ? color.new(color.green, 85) : na)
