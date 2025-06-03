@@ -1,0 +1,90 @@
+//@version=6
+strategy("Ede – Breakout Strategie (mit MA und ATR Exit)", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// === MA Inputs ===
+show_ma10   = input.bool(true, "MA10 anzeigen")
+show_ma50   = input.bool(true, "MA50 anzeigen")
+show_ma150  = input.bool(true, "MA150 anzeigen")
+show_ma200  = input.bool(true, "MA200 anzeigen")
+
+// === Breakout Settings ===
+breakout_mode_str = input.string(title="Breakout-Modus", defval="Streng (Gap UND starke Kerze)", options=["Streng (Gap UND starke Kerze)", "Locker (Gap ODER starke Kerze)", "Kein Gap nötig"])
+
+// Intern in Zahlen übersetzen für die Logik
+breakout_mode = breakout_mode_str == "Streng (Gap UND starke Kerze)" ? 1 : breakout_mode_str == "Locker (Gap ODER starke Kerze)" ? 2 : 3
+
+//#breakout_mode = input.int(2, title="Breakout-Modus", options=[1, 2, 3]) // 1=Streng (Gap+Starke Kerze), 2=Locker (Gap oder Kerze), 3=Kein Gap nötig
+volMultiplier = input.float(1.5, title="Volumen-Multiplikator", minval=0.5)
+
+// === Exit Settings ===
+use_stoploss     = input.bool(true, title="Stop-Loss verwenden?")
+stoploss_perc    = input.float(3.0, title="Stop-Loss %", minval=0.1)
+use_takeprofit   = input.bool(true, title="Take-Profit verwenden?")
+takeprofit_perc  = input.float(6.0, title="Take-Profit %", minval=0.1)
+exit_on_ma10     = input.bool(true, title="Exit bei MA10")
+exit_on_ma50     = input.bool(false, title="Exit bei MA50")
+exit_on_atr      = input.bool(true, title="ATR Exit aktivieren?")
+atr_period       = input.int(14, title="ATR Periode", minval=1)
+atr_multiplier   = input.float(2.0, title="ATR Multiplikator", minval=0.1)
+
+// === MA Berechnung ===
+sma10  = ta.sma(close, 10)
+sma50  = ta.sma(close, 50)
+sma150 = ta.sma(close, 150)
+sma200 = ta.sma(close, 200)
+
+// === MA Plots mit Transparenz ===
+plot(show_ma10  ? sma10  : na, color=color.new(color.blue,   40), title="MA10")
+plot(show_ma50  ? sma50  : na, color=color.new(color.orange, 40), title="MA50")
+plot(show_ma150 ? sma150 : na, color=color.new(color.green,  40), title="MA150")
+plot(show_ma200 ? sma200 : na, color=color.new(color.red,    40), title="MA200")
+
+// === Breakout Logik ===
+avgVol     = ta.sma(volume, 20)
+volBreak   = volume > avgVol * volMultiplier
+gap        = open > high[1]
+body       = math.abs(close - open)
+candleSize = high - low
+strongCandle = (close > open) and (body > candleSize * 0.5)
+maTrend    = sma50 > sma50[1]
+candleOK   = close > open
+
+isBreakout = volBreak and (close > sma50) and maTrend
+
+if breakout_mode == 1
+    isBreakout := isBreakout and gap and strongCandle
+else if breakout_mode == 2
+    isBreakout := isBreakout and (gap or strongCandle)
+else
+    isBreakout := isBreakout and candleOK
+
+// === Entry & Exit Management ===
+var bool inPosition = false
+var float entryPrice = na
+var float stopPrice = na
+var float targetPrice = na
+
+atr = ta.atr(atr_period)
+ma10Cross = ta.crossunder(close, sma10)
+ma50Cross = ta.crossunder(close, sma50)
+
+if isBreakout and not inPosition
+    strategy.entry("Breakout Long", strategy.long)
+    inPosition := true
+    entryPrice := close
+    stopPrice := close * (1 - stoploss_perc / 100)
+    targetPrice := close * (1 + takeprofit_perc / 100)
+
+if inPosition
+    stopHit   = use_stoploss    and close <= stopPrice
+    tpHit     = use_takeprofit  and close >= targetPrice
+    ma10Exit  = exit_on_ma10    and ma10Cross
+    ma50Exit  = exit_on_ma50    and ma50Cross
+    atrExit   = exit_on_atr     and close < entryPrice - (atr * atr_multiplier)
+
+    if stopHit or tpHit or ma10Exit or ma50Exit or atrExit
+        strategy.close("Breakout Long")
+        inPosition := false
+
+// === Visuelle Darstellung ===
+bgcolor(inPosition ? color.new(color.green, 85) : na)
