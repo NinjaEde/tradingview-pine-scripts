@@ -23,6 +23,10 @@ exit_on_ma50     = input.bool(false, title="Exit bei MA50")
 exit_on_atr      = input.bool(true, title="ATR Exit aktivieren?")
 atr_period       = input.int(14, title="ATR Periode", minval=1)
 atr_multiplier   = input.float(2.0, title="ATR Multiplikator", minval=0.1)
+// NEU: ATR-Trailing-Stop exklusiv?
+atr_exit_exclusive = input.bool(false, title="ATR-Trailing-Stop exklusiv (nur dieser Exit)?")
+// NEU: ATR-Trailing-Stop erst ab Gewinnschwelle aktivieren (in % vom Einstieg)?
+atr_trail_activation_perc = input.float(0.0, title="ATR-Trailing-Stop erst ab Gewinn (%) aktiv?", minval=0.0)
 
 // === MA Berechnung ===
 sma10  = ta.sma(close, 10)
@@ -46,7 +50,7 @@ strongCandle = (close > open) and (body > candleSize * 0.5)
 maTrend    = sma50 > sma50[1]
 candleOK   = close > open
 
-isBreakout = volBreak and (close > sma50) and maTrend
+isBreakout = volBreak and (close > sma50) and (open > close) and maTrend
 
 if breakout_mode == 1
     isBreakout := isBreakout and gap and strongCandle
@@ -82,20 +86,31 @@ if strategy.position_size > 0
     highestSinceEntry := na(highestSinceEntry) ? close : math.max(highestSinceEntry, high)
     // ATR-Trailing-Stop berechnen
     atrTrailStop := highestSinceEntry - atr * atr_multiplier
+    // NEU: ATR-Trailing-Stop erst ab Gewinnschwelle aktivieren
+    atr_trail_active = atr_trail_activation_perc == 0.0 or (close >= entryPrice * (1 + atr_trail_activation_perc / 100))
     // Exits
     stopHit   = use_stoploss    and close <= stopPrice
     tpHit     = use_takeprofit  and close >= targetPrice
     ma10Exit  = exit_on_ma10    and ma10Cross
     ma50Exit  = exit_on_ma50    and ma50Cross
-    atrExit   = exit_on_atr     and close < atrTrailStop
-
-    if stopHit or tpHit or ma10Exit or ma50Exit or atrExit
-        strategy.close("Breakout Long")
-        entryPrice := na
-        stopPrice := na
-        targetPrice := na
-        highestSinceEntry := na
-        atrTrailStop := na
+    atrExit   = exit_on_atr     and atr_trail_active and close < atrTrailStop
+    // NEU: ATR-Trailing-Stop exklusiv?
+    if atr_exit_exclusive
+        if atrExit
+            strategy.close("Breakout Long")
+            entryPrice := na
+            stopPrice := na
+            targetPrice := na
+            highestSinceEntry := na
+            atrTrailStop := na
+    else
+        if stopHit or tpHit or ma10Exit or ma50Exit or atrExit
+            strategy.close("Breakout Long")
+            entryPrice := na
+            stopPrice := na
+            targetPrice := na
+            highestSinceEntry := na
+            atrTrailStop := na
 
 // === Visuelle Darstellung ===
 // Linien für Stop-Loss, Take-Profit und ATR-Trailing-Stop
