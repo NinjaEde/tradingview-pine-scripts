@@ -1,0 +1,240 @@
+//@version=5
+indicator("Sector RS & Intermarket Regime Dashboard", "RS Sector Rotation", overlay=false, max_lines_count=500, max_labels_count=500)
+
+// ==============================
+// 1) INPUTS
+// ==============================
+useLogScale    = input.bool(true,  "Ratios log-transform (stabiler)")
+lengthRSFast   = input.int(20,    "RS-Momentum (schnell)",  5, 100)
+lengthRSMid    = input.int(60,    "RS-Momentum (mittel)", 20, 260)
+lengthSMA      = input.int(50,    "Glättung RS-SMA",       10, 260)
+
+lengthCopper   = input.int(100,   "Kupfer-Trend Länge",    20, 260)
+lengthOil      = input.int(100,   "Öl-Trend Länge",        20, 260)
+lengthHY       = input.int(50,    "Credit-Spread Länge",   10, 260)
+
+showTable      = input.bool(true, "Regime-Dashboard als Tabelle anzeigen")
+showSectors    = input.bool(true, "Sektor-RS-Charts anzeigen")
+showInter      = input.bool(true, "Intermarket-Signale anzeigen")
+
+// ==============================
+// 2) SYMBOL-DEFINITIONEN
+// ==============================
+// Sektoren (US-Select Sector SPDR)
+symXLF = "XLF"   // Financials
+symXLY = "XLY"   // Consumer Discretionary
+symXLI = "XLI"   // Industrials
+symXLK = "XLK"   // Technology
+symXLE = "XLE"   // Energy
+symXLU = "XLU"   // Utilities
+symSPY = "SPY"   // Benchmark
+
+// Intermarket
+symCopper = "HG1!"          // Continuous Copper Futures (COMEX)
+symOil    = "CL1!"          // Continuous Crude Oil Futures (WTI)
+symHY     = "BAMLH0A0HYM2"  // ICE BofA US High Yield OAS (FRED)
+
+// ==============================
+// 3) HILFSFUNKTIONEN
+// ==============================
+
+// Sicheres Request
+f_sec(sym) =>
+    request.security(sym, timeframe.period, close, barmerge.gaps_on, barmerge.lookahead_off)
+
+// Ratio mit optional Log
+f_ratio(num, den) =>
+    r = den != 0.0 ? num / den : na
+    useLogScale ? math.log(r) : r
+
+// Normalisierte Veränderung (Momentum) über length
+f_chg(src, len) =>
+    src[len] != 0.0 ? (src/src[len] - 1.0) : na
+
+// Ampelfarben
+f_colorBull() => color.new(color.lime,  0)
+f_colorBear() => color.new(color.red,  0)
+f_colorNeutral() => color.new(color.gray, 0)
+
+// ==============================
+// 4) SEKTOR-DATEN & RELATIVE STRENGTH
+// ==============================
+xlf = f_sec(symXLF)
+xly = f_sec(symXLY)
+xli = f_sec(symXLI)
+xlk = f_sec(symXLK)
+xle = f_sec(symXLE)
+xlu = f_sec(symXLU)
+spy = f_sec(symSPY)
+
+// Ratios (Zykliker vs. Defensiv/Tech)
+rsXLF_XLK = f_ratio(xlf, xlk)
+rsXLY_XLK = f_ratio(xly, xlk)
+rsXLI_XLK = f_ratio(xli, xlk)
+rsXLF_XLU = f_ratio(xlf, xlu)
+rsXLY_XLU = f_ratio(xly, xlu)
+rsXLI_XLU = f_ratio(xli, xlu)
+
+// Glättung & Momentum
+rsXLF_XLK_sma = ta.sma(rsXLF_XLK, lengthSMA)
+rsXLF_XLK_chgFast = f_chg(rsXLF_XLK, lengthRSFast)
+rsXLF_XLK_chgMid  = f_chg(rsXLF_XLK, lengthRSMid)
+
+rsXLY_XLK_sma = ta.sma(rsXLY_XLK, lengthSMA)
+rsXLY_XLK_chgFast = f_chg(rsXLY_XLK, lengthRSFast)
+rsXLY_XLK_chgMid  = f_chg(rsXLY_XLK, lengthRSMid)
+
+rsXLI_XLK_sma = ta.sma(rsXLI_XLK, lengthSMA)
+rsXLI_XLK_chgFast = f_chg(rsXLI_XLK, lengthRSFast)
+rsXLI_XLK_chgMid  = f_chg(rsXLI_XLK, lengthRSMid)
+
+// Zentrales RS-Signal: Finanz vs Tech
+rsFinTech       = rsXLF_XLK
+rsFinTech_sma   = rsXLF_XLK_sma
+rsFinTech_fast  = rsXLF_XLK_chgFast
+rsFinTech_mid   = rsXLF_XLK_chgMid
+
+bool rsFinTechBull = rsFinTech > rsFinTech_sma and rsFinTech_fast > 0 and rsFinTech_mid > 0
+bool rsFinTechBear = rsFinTech < rsFinTech_sma and rsFinTech_fast < 0 and rsFinTech_mid < 0
+
+// ==============================
+// 5) INTERMARKET-DATEN
+// ==============================
+copper = f_sec(symCopper)
+oil    = f_sec(symOil)
+hy     = f_sec(symHY)
+
+// Trend-Filter
+copperSMA = ta.sma(copper, lengthCopper)
+oilSMA    = ta.sma(oil,    lengthOil)
+hySMA     = ta.sma(hy,     lengthHY)
+
+// Momentum (z.B. 3M ~ 60 Handelstage)
+copperChg = f_chg(copper, lengthRSMid)
+oilChg    = f_chg(oil,    lengthRSMid)
+hyChg     = f_chg(hy,     lengthRSMid)
+
+// Regime-Flags
+bool copperBull = copper > copperSMA and copperChg > 0
+bool copperBear = copper < copperSMA and copperChg < 0
+
+bool oilBull = oil > oilSMA and oilChg > 0
+bool oilBear = oil < oilSMA and oilChg < 0
+
+// Für HY: eng = Risk-On, weit = Risk-Off (vereinfachter Ansatz)
+bool hyRiskOn  = hy < hySMA and hyChg <= 0
+bool hyRiskOff = hy > hySMA and hyChg >= 0
+
+// ==============================
+// 6) GLOBALES REGIME
+// ==============================
+int riskScore = 0
+riskScore += rsFinTechBull ? 1 : rsFinTechBear ? -1 : 0
+riskScore += copperBull    ? 1 : copperBear    ? -1 : 0
+riskScore += oilBull       ? 1 : oilBear       ? -1 : 0
+riskScore += hyRiskOn      ? 1 : hyRiskOff     ? -1 : 0
+
+// Risk-On / Neutral / Risk-Off
+bool regimeRiskOn  = riskScore >= 2
+bool regimeRiskOff = riskScore <= -2
+bool regimeNeutral = not regimeRiskOn and not regimeRiskOff
+
+// ==============================
+// 7) VISUALISIERUNG – SEKTOR-RS
+// ==============================
+if showSectors
+    secFin  = "XLF vs XLK"
+    secDisc = "XLY vs XLK"
+    secInd  = "XLI vs XLK"
+
+    // Panel 1: Finanz vs. Tech
+    plot(rsFinTech,       title=secFin,  color=color.new(color.orange, 0))
+    plot(rsFinTech_sma,   title="SMA "+str.tostring(lengthSMA), color=color.new(color.white, 0))
+    hline(na)  // Abstandshalter für schönes Panel
+
+    // Panel 2: optional weitere RS (als separate Plots im selben Fenster)
+    plot(rsXLY_XLK,       title=secDisc, color=color.new(color.teal,  0))
+    plot(rsXLY_XLK_sma,   title=secDisc+" SMA", color=color.new(color.teal, 60))
+    plot(rsXLI_XLK,       title=secInd,  color=color.new(color.blue,  0))
+    plot(rsXLI_XLK_sma,   title=secInd+" SMA", color=color.new(color.blue, 60))
+
+// ==============================
+// 8) VISUALISIERUNG – INTERMARKET
+// ==============================
+if showInter
+    // Kupfer
+    copperColor = copperBull ? f_colorBull() : copperBear ? f_colorBear() : f_colorNeutral()
+    plot(copper,     title="Kupfer", color=copperColor)
+    plot(copperSMA,  title="Kupfer SMA "+str.tostring(lengthCopper), color=color.new(color.white, 40))
+
+    // Öl
+    oilColor = oilBull ? f_colorBull() : oilBear ? f_colorBear() : f_colorNeutral()
+    plot(oil,    title="Öl", color=oilColor)
+    plot(oilSMA, title="Öl SMA "+str.tostring(lengthOil), color=color.new(color.white, 40))
+
+    // HY-Spreads (invertierte Logik – höher = mehr Risiko)
+    hyColor = hyRiskOn ? f_colorBull() : hyRiskOff ? f_colorBear() : f_colorNeutral()
+    plot(hy,    title="HY-Spread", color=hyColor)
+    plot(hySMA, title="HY SMA "+str.tostring(lengthHY), color=color.new(color.white, 40))
+
+// ==============================
+// 9) DASHBOARD-TABELLE
+// ==============================
+var table dash = na
+if showTable
+    if barstate.isfirst
+        dash := table.new(position.top_right, 4, 6, border_width=1)
+        table.cell(dash, 0, 0, "Block",   bgcolor=color.new(color.silver, 0))
+        table.cell(dash, 0, 1, "Signal",  bgcolor=color.new(color.silver, 0))
+        table.cell(dash, 0, 2, "Status",  bgcolor=color.new(color.silver, 0))
+        table.cell(dash, 0, 3, "Score",   bgcolor=color.new(color.silver, 0))
+
+    // Zeile 1 – Globales Regime
+    regText = regimeRiskOn ? "Risk-ON" : regimeRiskOff ? "Risk-OFF" : "Neutral"
+    regColor = regimeRiskOn ? f_colorBull() : regimeRiskOff ? f_colorBear() : f_colorNeutral()
+
+    table.cell(dash, 1, 0, "Regime", bgcolor=color.new(color.black, 0))
+    table.cell(dash, 1, 1, "Score",  bgcolor=color.new(color.black, 0))
+    table.cell(dash, 1, 2, regText, text_color=color.white, bgcolor=regColor)
+    table.cell(dash, 1, 3, str.tostring(riskScore), text_color=color.white, bgcolor=color.new(color.black, 0))
+
+    // Zeile 2 – RS Finanz vs Tech
+    textFin = rsFinTechBull ? "Zykliker > Tech" : rsFinTechBear ? "Tech > Zykliker" : "Unklar"
+    colFin  = rsFinTechBull ? f_colorBull() : rsFinTechBear ? f_colorBear() : f_colorNeutral()
+    table.cell(dash, 2, 0, "Sektor", bgcolor=color.new(color.black, 0))
+    table.cell(dash, 2, 1, "XLF vs XLK", bgcolor=color.new(color.black, 0))
+    table.cell(dash, 2, 2, textFin, text_color=color.white, bgcolor=colFin)
+    table.cell(dash, 2, 3, str.tostring(rsFinTech_fast * 100, "#.##")+"% / "+str.tostring(rsFinTech_mid * 100, "#.##")+"%", text_color=color.white, bgcolor=color.new(color.black, 0))
+
+    // Zeile 3 – Kupfer
+    textCu = copperBull ? "Zyklisch stark" : copperBear ? "Zyklisch schwach" : "Neutral"
+    colCu  = copperBull ? f_colorBull() : copperBear ? f_colorBear() : f_colorNeutral()
+    table.cell(dash, 3, 0, "Kupfer", bgcolor=color.new(color.black, 0))
+    table.cell(dash, 3, 1, "Trend",  bgcolor=color.new(color.black, 0))
+    table.cell(dash, 3, 2, textCu,   text_color=color.white, bgcolor=colCu)
+    table.cell(dash, 3, 3, str.tostring(copperChg * 100, "#.##")+"%", text_color=color.white, bgcolor=color.new(color.black, 0))
+
+    // Zeile 4 – Öl
+    textOil = oilBull ? "Reflation" : oilBear ? "Deflationär/Schwach" : "Neutral"
+    colOil  = oilBull ? f_colorBull() : oilBear ? f_colorBear() : f_colorNeutral()
+    table.cell(dash, 4, 0, "Öl",    bgcolor=color.new(color.black, 0))
+    table.cell(dash, 4, 1, "Trend", bgcolor=color.new(color.black, 0))
+    table.cell(dash, 4, 2, textOil, text_color=color.white, bgcolor=colOil)
+    table.cell(dash, 4, 3, str.tostring(oilChg * 100, "#.##")+"%", text_color=color.white, bgcolor=color.new(color.black, 0))
+
+    // Zeile 5 – HY-Spreads
+    textHY = hyRiskOn ? "Spreads eng (Risk-On)" : hyRiskOff ? "Spreads weit (Risk-Off)" : "Neutral"
+    colHY  = hyRiskOn ? f_colorBull() : hyRiskOff ? f_colorBear() : f_colorNeutral()
+    table.cell(dash, 5, 0, "Credit", bgcolor=color.new(color.black, 0))
+    table.cell(dash, 5, 1, "HY OAS", bgcolor=color.new(color.black, 0))
+    table.cell(dash, 5, 2, textHY,   text_color=color.white, bgcolor=colHY)
+    table.cell(dash, 5, 3, str.tostring(hyChg * 100, "#.##")+"%", text_color=color.white, bgcolor=color.new(color.black, 0))
+
+// ==============================
+// 10) HINTS FÜR STOCK-PICKING (SIGNAL-LABELS AUF DEM CHART)
+// ==============================
+var label regimeLabel = na
+if barstate.islast
+    label.delete(regimeLabel)
+    txt = "Regime: " + regText + "\nScore: " + str.tostring(riskScore)
+    regimeLabel := label.new(bar_index, na, txt, style=label.style_label_left, yloc=yloc.price, color=color.new(color.black, 0), textcolor=color.white)
