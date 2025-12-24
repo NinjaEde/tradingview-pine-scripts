@@ -1,0 +1,37 @@
+//@version=5
+indicator("Harter VIX Curve Breakout Filter", overlay=true)
+
+// --- Parameter ---
+ratioThreshold = 0.98
+vixMax         = 20
+smoothLen      = 5
+
+// --- VIX Daten ---
+vix   = request.security("CBOE:VIX", timeframe.period, close)
+vix3m = request.security("CBOE:VIX3M", timeframe.period, close)
+
+// --- Ratio + Glättung ---
+ratio     = vix / vix3m
+ratioSMA  = ta.sma(ratio, smoothLen)
+
+// --- Filterlogik ---
+breakoutAllowed =
+     ratioSMA < ratioThreshold and
+     vix < vixMax
+
+// --- Visualisierung ---
+bgcolor(
+     breakoutAllowed
+     ? color.new(color.green, 85)
+     : color.new(color.red, 85)
+)
+
+// --- Status-Label ---
+label.new(
+     bar_index,
+     high,
+     breakoutAllowed ? "BREAKOUT OK" : "BREAKOUT BLOCKED",
+     style=label.style_label_down,
+     textcolor=color.white,
+     color= breakoutAllowed ? color.green : color.red
+)
