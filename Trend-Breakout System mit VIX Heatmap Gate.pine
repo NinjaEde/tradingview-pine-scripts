@@ -1,0 +1,80 @@
+//@version=5
+strategy(
+    "Trend-Breakout System mit VIX Heatmap Gate",
+    overlay=true,
+    initial_capital=100000,
+    default_qty_type=strategy.percent_of_equity,
+    default_qty_value=10,
+    pyramiding=0
+)
+
+// =====================
+// VIX HEATMAP REGIME
+// =====================
+vix   = request.security("CBOE:VIX", timeframe.period, close)
+vix3m = request.security("CBOE:VIX3M", timeframe.period, close)
+
+ratio = vix / vix3m
+
+score = 0
+score += ratio < 0.98 ? 1 : 0
+score += ratio < 0.95 ? 1 : 0
+score += vix < 20 ? 1 : 0
+score += vix < 15 ? 1 : 0
+
+regimeOK = score >= 3
+
+// =====================
+// TREND FILTER
+// =====================
+maLen = input.int(50, "Trend MA")
+ma    = ta.sma(close, maLen)
+
+trendOK = close > ma and ma > ma[1]
+
+// =====================
+// BREAKOUT ENTRY
+// =====================
+donLen = input.int(20, "Donchian Lookback")
+volLen = input.int(20, "Volume SMA")
+
+donHigh   = ta.highest(high, donLen)
+volOK     = volume > ta.sma(volume, volLen)
+
+breakout = close > donHigh[1] and volOK
+
+// =====================
+// ENTRY
+// =====================
+if breakout and trendOK and regimeOK
+    strategy.entry("Trend Breakout Long", strategy.long)
+
+// =====================
+// EXIT
+// =====================
+atrLen = input.int(14, "ATR Length")
+atrMul = input.float(2.5, "ATR Multiplier")
+
+atr = ta.atr(atrLen)
+
+strategy.exit(
+    "ATR Exit",
+    from_entry="Trend Breakout Long",
+    stop=close - atr * atrMul
+)
+
+// Regime kippt → sofort raus
+if strategy.position_size > 0 and score < 2
+    strategy.close("Trend Breakout Long")
+
+// =====================
+// VISUALS
+// =====================
+bgcolor(
+     score >= 3 ? color.new(color.green, 85) :
+     score == 2 ? color.new(color.yellow, 85) :
+     color.new(color.red, 85)
+)
+
+plot(donHigh, "Donchian High", color=color.orange)
+plot(ma, "MA50", color=color.blue)
