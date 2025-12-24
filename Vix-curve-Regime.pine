@@ -1,0 +1,21 @@
+//@version=5
+indicator("VIX Curve Regime (Simple)", overlay=false)
+
+// VIX Daten abrufen
+vix    = request.security("CBOE:VIX", timeframe.period, close)
+vix3m  = request.security("CBOE:VIX3M", timeframe.period, close)
+
+// Verhältnis berechnen
+ratio = vix / vix3m
+
+// Plot
+plot(ratio, title="VIX / VIX3M Ratio", linewidth=2)
+
+// Referenzlinie
+hline(1.0, "Contango / Backwardation Grenze", linestyle=hline.style_dashed)
+
+// Hintergrund einfärben
+bgcolor(
+     ratio > 1 ? color.new(color.red, 85) :
+     color.new(color.green, 85)
+)
